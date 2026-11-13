@@ -139,6 +139,8 @@ async def _whisper_transcribe(wav_path: Path, *, model_path: Path) -> str:
         str(wav_path),
         "-t",
         str(settings.threads),
+        # Print only the transcript (no model/system info).
+        "-np",
     ]
     # `whisper-cli` defaults to English if no language is provided. For automatic language we specifically pass -l auto.
     lang = (settings.language or "").strip() or "auto"
@@ -153,8 +155,9 @@ async def _whisper_transcribe(wav_path: Path, *, model_path: Path) -> str:
         msg = (result.stderr or result.stdout).strip()
         raise HTTPException(status_code=500, detail=f"Transcription failed: {msg or 'unknown error'}")
 
-    combined = "\n".join([result.stdout, result.stderr])
-    text = _extract_transcript(combined)
+    # The transcript is written to stdout; stderr carries only logs (e.g. "read_audio_data: ..."
+    # in current whisper.cpp builds), which must not end up in the text.
+    text = _extract_transcript(result.stdout)
     return " ".join(text.split()).strip()
 
 
@@ -197,7 +200,8 @@ async def transcribe(request: Request) -> Response:
 
         with tempfile.TemporaryDirectory(prefix="mensa-stt-") as tmp_dir:
             tmp_dir_p = Path(tmp_dir)
-            in_path = tmp_dir_p / f"input{suffix}"
+            # Must differ from wav_path, otherwise ffmpeg refuses WAV uploads ("same as Input").
+            in_path = tmp_dir_p / f"upload{suffix}"
             wav_path = tmp_dir_p / "input.wav"
 
             in_path.write_bytes(audio_bytes)
